@@ -1,0 +1,15 @@
+services:
+  app:
+    image: ghcr.io/${GITHUB_REPOSITORY}:${IMAGE_TAG:-latest}
+    container_name: go-test
+    restart: unless-stopped
+    ports:
+      - "2593:2593"
+    environment:
+      - PORT=2593
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:2593/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 5s

@@ -1,0 +1,134 @@
+name: Rollback Deployment
+
+on:
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: 'Image tag to rollback to (e.g., main-abc1234 or sha-abc1234)'
+        required: true
+        type: string
+      environment:
+        description: 'Environment to rollback'
+        required: true
+        type: choice
+        options:
+          - production
+          - staging
+        default: production
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  rollback:
+    name: Rollback to Previous Version
+    runs-on: ubuntu-latest
+    environment:
+      name: ${{ inputs.environment }}
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Validate image tag
+        id: validate
+        run: |
+          IMAGE="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ inputs.image_tag }}"
+          echo "Rolling back to image: $IMAGE"
+          echo "image=$IMAGE" >> $GITHUB_OUTPUT
+
+      - name: Log in to Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Verify image exists
+        run: |
+          docker manifest inspect ${{ steps.validate.outputs.image }} > /dev/null 2>&1
+          if [ $? -ne 0 ]; then
+            echo "Error: Image ${{ steps.validate.outputs.image }} does not exist"
+            exit 1
+          fi
+          echo "Image verified successfully"
+
+      - name: Execute rollback
+        uses: appleboy/ssh-action@v1.0.3
+        env:
+          IMAGE_TAG: ${{ steps.validate.outputs.image }}
+          CONTAINER_NAME: ${{ vars.CONTAINER_NAME }}
+          HOST_PORT: ${{ vars.HOST_PORT }}
+          CONTAINER_PORT: ${{ vars.CONTAINER_PORT }}
+        with:
+          host: ${{ secrets.DOCKER_HOST }}
+          username: ${{ secrets.DOCKER_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          port: ${{ secrets.SSH_PORT || 22 }}
+          envs: IMAGE_TAG,CONTAINER_NAME,HOST_PORT,CONTAINER_PORT
+          script: |
+            echo "Starting rollback to: ${IMAGE_TAG}"
+
+            # Login to GitHub Container Registry
+            echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+
+            # Pull the rollback image
+            echo "Pulling rollback image..."
+            docker pull ${IMAGE_TAG}
+
+            # Backup current container
+            BACKUP_NAME="${CONTAINER_NAME}-backup-$(date +%s)"
+            echo "Creating backup of current container: ${BACKUP_NAME}"
+            docker rename ${CONTAINER_NAME} ${BACKUP_NAME} || true
+            docker stop ${BACKUP_NAME} || true
+
+            # Start rollback container
+            echo "Starting rollback container..."
+            docker run -d \
+              --name ${CONTAINER_NAME} \
+              --restart unless-stopped \
+              -p ${HOST_PORT}:${CONTAINER_PORT} \
+              -e PORT=${CONTAINER_PORT} \
+              ${IMAGE_TAG}
+
+            # Wait for container to be healthy
+            echo "Waiting for container to be healthy..."
+            for i in {1..30}; do
+              if docker inspect --format='{{.State.Health.Status}}' ${CONTAINER_NAME} | grep -q "healthy"; then
+                echo "Rollback successful! Container is healthy."
+                # Remove backup container
+                docker rm ${BACKUP_NAME} || true
+                exit 0
+              fi
+              if [ $i -eq 30 ]; then
+                echo "Rollback failed! Container not healthy."
+                echo "Rolling forward to backup..."
+                docker stop ${CONTAINER_NAME}
+                docker rm ${CONTAINER_NAME}
+                docker rename ${BACKUP_NAME} ${CONTAINER_NAME}
+                docker start ${CONTAINER_NAME}
+                exit 1
+              fi
+              echo "Waiting... ($i/30)"
+              sleep 2
+            done
+
+      - name: Create rollback summary
+        if: always()
+        run: |
+          echo "## Rollback Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Environment**: ${{ inputs.environment }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Target Image**: \`${{ steps.validate.outputs.image }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **Triggered by**: @${{ github.actor }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Timestamp**: $(date -u '+%Y-%m-%d %H:%M:%S UTC')" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          if [ "${{ job.status }}" == "success" ]; then
+            echo "✅ **Status**: Rollback completed successfully" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "❌ **Status**: Rollback failed" >> $GITHUB_STEP_SUMMARY
+          fi
