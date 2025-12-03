@@ -9,7 +9,7 @@ on:
       - '.github/workflows/IMPLEMENTATION-PLAN.md'
 
 env:
-  GO_VERSION: "1.25"
+  GO_VERSION: "1.25.4"
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository }}
 
@@ -155,9 +155,9 @@ jobs:
           go mod tidy
 
       - name: Run golangci-lint
-        uses: golangci/golangci-lint-action@v4
+        uses: golangci/golangci-lint-action@v6
         with:
-          version: v1.62.0
+          version: latest
           args: --timeout=5m
 
   security-scan:
