@@ -10,7 +10,7 @@ RUN go mod tidy
 # Build the application
 RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o server main.go
 
-FROM alpine:3.19
+FROM alpine:3.21
 
 # Install ca-certificates and wget for health checks
 RUN apk --no-cache add ca-certificates wget
