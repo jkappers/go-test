@@ -20,6 +20,9 @@ env:
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository }}
 
+permissions:
+  contents: read
+
 jobs:
   rollback:
     name: Rollback to Previous Version
@@ -63,17 +66,19 @@ jobs:
           CONTAINER_NAME: ${{ vars.CONTAINER_NAME }}
           HOST_PORT: ${{ vars.HOST_PORT }}
           CONTAINER_PORT: ${{ vars.CONTAINER_PORT }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_ACTOR: ${{ github.actor }}
         with:
           host: ${{ secrets.DOCKER_HOST }}
           username: ${{ secrets.DOCKER_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           port: ${{ secrets.SSH_PORT || 22 }}
-          envs: IMAGE_TAG,CONTAINER_NAME,HOST_PORT,CONTAINER_PORT
+          envs: IMAGE_TAG,CONTAINER_NAME,HOST_PORT,CONTAINER_PORT,GH_TOKEN,GH_ACTOR
           script: |
             echo "Starting rollback to: ${IMAGE_TAG}"
 
             # Login to GitHub Container Registry
-            echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+            echo "$GH_TOKEN" | docker login ghcr.io -u "$GH_ACTOR" --password-stdin
 
             # Pull the rollback image
             echo "Pulling rollback image..."

@@ -23,6 +23,9 @@ on:
       GH_TOKEN:
         required: true
 
+permissions:
+  contents: read
+
 jobs:
   deploy:
     name: Deploy to ${{ inputs.environment }}
@@ -42,15 +45,17 @@ jobs:
           HOST_PORT: ${{ vars.HOST_PORT }}
           CONTAINER_PORT: ${{ vars.CONTAINER_PORT }}
           GITHUB_REPOSITORY: ${{ github.repository }}
+          GH_TOKEN: ${{ secrets.GH_TOKEN }}
+          GH_ACTOR: ${{ github.actor }}
         with:
           host: ${{ secrets.DOCKER_HOST }}
           username: ${{ secrets.DOCKER_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           port: ${{ secrets.SSH_PORT || 22 }}
-          envs: IMAGE_TAG,CONTAINER_NAME,HOST_PORT,CONTAINER_PORT,GITHUB_REPOSITORY
+          envs: IMAGE_TAG,CONTAINER_NAME,HOST_PORT,CONTAINER_PORT,GITHUB_REPOSITORY,GH_TOKEN,GH_ACTOR
           script: |
             # Login to GitHub Container Registry
-            echo "${{ secrets.GH_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+            echo "$GH_TOKEN" | docker login ghcr.io -u "$GH_ACTOR" --password-stdin
 
             # Pull the new image
             echo "Pulling image: ${IMAGE_TAG}"
