@@ -1,7 +1,7 @@
 services:
   app:
     image: ghcr.io/${GITHUB_REPOSITORY}:${IMAGE_TAG:-latest}
-    container_name: go-test
+    container_name: dotnet-api-test
     restart: unless-stopped
     ports:
       - "2593:2593"

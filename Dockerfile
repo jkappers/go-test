@@ -1,22 +1,19 @@
-FROM golang:1.25-alpine AS builder
+FROM mcr.microsoft.com/dotnet/sdk:10.0-alpine AS builder
 
 WORKDIR /app
-COPY main.go .
+COPY src/*.csproj ./
+RUN dotnet restore
 
-# Initialize go module if not exists
-RUN go mod init github.com/example/go-sample || true
-RUN go mod tidy
+COPY src/ ./
+RUN dotnet publish -c Release -o out
 
-# Build the application
-RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o server main.go
+FROM mcr.microsoft.com/dotnet/runtime-deps:10.0-alpine
 
-FROM alpine:3.21
-
-# Install ca-certificates and wget for health checks
-RUN apk --no-cache add ca-certificates wget
+# Install wget for health checks
+RUN apk --no-cache add wget
 
 WORKDIR /app
-COPY --from=builder /app/server .
+COPY --from=builder /app/out/sample .
 
 # Add non-root user
 RUN addgroup -g 1000 appuser && \
@@ -30,4 +27,4 @@ EXPOSE 2593
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
   CMD wget --no-verbose --tries=1 --spider http://localhost:2593/health || exit 1
 
-CMD ["./server"]
+ENTRYPOINT ["./sample"]
