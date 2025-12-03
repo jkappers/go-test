@@ -15,7 +15,7 @@ func main() {
 
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		hostname, _ := os.Hostname()
-		fmt.Fprintf(w, "Hello from %s\n", hostname)
+		fmt.Fprintf(w, "Greetings from %s\n", hostname)
 	})
 
 	http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
