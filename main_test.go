@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -9,7 +10,7 @@ import (
 )
 
 func TestHealthHandler(t *testing.T) {
-	req, err := http.NewRequest("GET", "/health", nil)
+	req, err := http.NewRequestWithContext(context.Background(), "GET", "/health", http.NoBody)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -17,7 +18,9 @@ func TestHealthHandler(t *testing.T) {
 	rr := httptest.NewRecorder()
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("OK"))
+		if _, err := w.Write([]byte("OK")); err != nil {
+			t.Errorf("Failed to write response: %v", err)
+		}
 	})
 
 	handler.ServeHTTP(rr, req)
@@ -35,15 +38,17 @@ func TestHealthHandler(t *testing.T) {
 }
 
 func TestRootHandler(t *testing.T) {
-	req, err := http.NewRequest("GET", "/", nil)
+	req, err := http.NewRequestWithContext(context.Background(), "GET", "/", http.NoBody)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	rr := httptest.NewRecorder()
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		hostname, _ := os.Hostname()
-		w.Write([]byte("Hello from " + hostname + "\n"))
+		hostname, _ := os.Hostname() //nolint:errcheck // hostname fallback is acceptable in tests
+		if _, err := w.Write([]byte("Hello from " + hostname + "\n")); err != nil {
+			t.Errorf("Failed to write response: %v", err)
+		}
 	})
 
 	handler.ServeHTTP(rr, req)
@@ -80,8 +85,7 @@ func TestPortEnvironmentVariable(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			if tt.envValue != "" {
-				os.Setenv("PORT", tt.envValue)
-				defer os.Unsetenv("PORT")
+				t.Setenv("PORT", tt.envValue)
 			}
 
 			port := os.Getenv("PORT")
