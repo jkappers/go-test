@@ -8,7 +8,7 @@ on:
 env:
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository }}
-  GO_VERSION: "1.25.4"
+  DOTNET_VERSION: "10.0.x"
 
 permissions:
   contents: read
@@ -29,42 +29,46 @@ jobs:
         with:
           ref: ${{ matrix.branch }}
 
-      - name: Set up Go
-        uses: actions/setup-go@v5
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
         with:
-          go-version: ${{ env.GO_VERSION }}
-          cache: true
+          dotnet-version: ${{ env.DOTNET_VERSION }}
 
-      - name: Run gosec Security Scanner
-        uses: securego/gosec@v2.21.4
-        with:
-          args: '-fmt sarif -out gosec-${{ matrix.branch }}.sarif ./...'
-        continue-on-error: true
+      - name: Restore dependencies
+        run: dotnet restore
 
-      - name: Upload gosec results
-        uses: github/codeql-action/upload-sarif@v4
-        if: always()
-        with:
-          sarif_file: gosec-${{ matrix.branch }}.sarif
-          category: gosec-${{ matrix.branch }}
-
-      - name: Run govulncheck
-        id: govulncheck
+      - name: Check for vulnerable packages
+        id: vuln_check
         run: |
-          go install golang.org/x/vuln/cmd/govulncheck@latest
-          govulncheck ./... > vulncheck-${{ matrix.branch }}.txt 2>&1 || true
-
-          if grep -q "Vulnerability" vulncheck-${{ matrix.branch }}.txt; then
+          dotnet list package --vulnerable --include-transitive 2>&1 | tee vulnerable-${{ matrix.branch }}.txt
+          if grep -q "has the following vulnerable packages" vulnerable-${{ matrix.branch }}.txt; then
             echo "vulnerabilities_found=true" >> $GITHUB_OUTPUT
           else
             echo "vulnerabilities_found=false" >> $GITHUB_OUTPUT
           fi
+        continue-on-error: true
+
+      - name: Install security-code-scan tool
+        run: dotnet tool install --global security-scan --version 5.6.7
+
+      - name: Run security code analysis
+        run: |
+          security-scan src/sample.csproj --verbose --export=security-${{ matrix.branch }}.sarif || true
+        continue-on-error: true
+
+      - name: Upload security results
+        uses: github/codeql-action/upload-sarif@v4
+        if: always()
+        with:
+          sarif_file: security-${{ matrix.branch }}.sarif
+          category: security-code-scan-${{ matrix.branch }}
+        continue-on-error: true
 
       - name: Upload vulnerability report
         uses: actions/upload-artifact@v4
         with:
-          name: vulncheck-${{ matrix.branch }}
-          path: vulncheck-${{ matrix.branch }}.txt
+          name: vulnerable-packages-${{ matrix.branch }}
+          path: vulnerable-${{ matrix.branch }}.txt
           retention-days: 30
 
   container-security:
@@ -142,8 +146,8 @@ jobs:
           echo "- staging" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### Scans Performed" >> $GITHUB_STEP_SUMMARY
-          echo "- gosec (Go security linter)" >> $GITHUB_STEP_SUMMARY
-          echo "- govulncheck (Go vulnerability check)" >> $GITHUB_STEP_SUMMARY
+          echo "- dotnet list package --vulnerable (NuGet package vulnerability check)" >> $GITHUB_STEP_SUMMARY
+          echo "- security-code-scan (.NET security analyzer)" >> $GITHUB_STEP_SUMMARY
           echo "- Trivy (Container vulnerability scanner)" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### Results" >> $GITHUB_STEP_SUMMARY
@@ -151,10 +155,10 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
 
           # Check for vulnerabilities in reports
-          if ls reports/vulncheck-*/vulncheck-*.txt 1> /dev/null 2>&1; then
+          if ls reports/vulnerable-packages-*/vulnerable-*.txt 1> /dev/null 2>&1; then
             echo "### Vulnerability Reports" >> $GITHUB_STEP_SUMMARY
-            for report in reports/vulncheck-*/vulncheck-*.txt; do
-              branch=$(basename "$report" .txt | sed 's/vulncheck-//')
+            for report in reports/vulnerable-packages-*/vulnerable-*.txt; do
+              branch=$(basename "$report" .txt | sed 's/vulnerable-//')
               echo "" >> $GITHUB_STEP_SUMMARY
               echo "#### $branch" >> $GITHUB_STEP_SUMMARY
               echo '```' >> $GITHUB_STEP_SUMMARY

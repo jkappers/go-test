@@ -9,7 +9,7 @@ on:
       - '.github/workflows/IMPLEMENTATION-PLAN.md'
 
 env:
-  GO_VERSION: "1.25.4"
+  DOTNET_VERSION: "10.0.x"
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository }}
 
@@ -35,32 +35,29 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Set up Go
-        uses: actions/setup-go@v5
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
         with:
-          go-version: ${{ env.GO_VERSION }}
-          cache: true
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Restore dependencies
+        run: dotnet restore
 
       - name: Check code formatting
         run: |
-          if [ -n "$(gofmt -l .)" ]; then
-            echo "The following files are not formatted correctly:"
-            gofmt -l .
-            echo ""
-            echo "Please run 'gofmt -w .' to format your code"
+          dotnet format --verify-no-changes --verbosity diagnostic
+          if [ $? -ne 0 ]; then
+            echo "Code formatting issues detected. Please run 'dotnet format' to fix formatting."
             exit 1
           fi
 
-      - name: Run go mod verify
-        run: |
-          go mod init github.com/${{ github.repository }} || true
-          go mod tidy
-          go mod verify
+      - name: Build solution
+        run: dotnet build --no-restore --configuration Release
 
       - name: Check for common issues
         run: |
           # Check for TODO/FIXME comments
-          if grep -r "TODO\|FIXME" --include="*.go" .; then
+          if grep -r "TODO\|FIXME" --include="*.cs" .; then
             echo "Found TODO/FIXME comments. Please review before merging."
           fi
 
@@ -114,21 +111,37 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Set up Go
-        uses: actions/setup-go@v5
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
         with:
-          go-version: ${{ env.GO_VERSION }}
-          cache: true
+          dotnet-version: ${{ env.DOTNET_VERSION }}
 
-      - name: Run tests
-        run: go test -v -race -coverprofile=coverage.out -covermode=atomic ./...
+      - name: Restore dependencies
+        run: dotnet restore
+
+      - name: Run tests with coverage
+        run: dotnet test --no-restore --verbosity normal --collect:"XPlat Code Coverage" --results-directory ./coverage
 
       - name: Check test coverage
         run: |
-          total_coverage=$(go tool cover -func=coverage.out | grep total | awk '{print $3}' | sed 's/%//')
-          echo "Total coverage: ${total_coverage}%"
-          if (( $(echo "$total_coverage < 70" | bc -l) )); then
-            echo "::warning::Coverage is below 70%"
+          # Install reportgenerator for coverage analysis
+          dotnet tool install -g dotnet-reportgenerator-globaltool
+
+          # Generate coverage report
+          reportgenerator -reports:./coverage/**/coverage.cobertura.xml -targetdir:./coverage/report -reporttypes:Html
+
+          # Extract coverage percentage from Cobertura XML
+          coverage_file=$(find ./coverage -name "coverage.cobertura.xml" | head -n 1)
+          if [ -f "$coverage_file" ]; then
+            total_coverage=$(grep -oP 'line-rate="\K[0-9.]+' "$coverage_file" | head -n 1)
+            total_coverage_percent=$(echo "$total_coverage * 100" | bc)
+            echo "Total coverage: ${total_coverage_percent}%"
+
+            if (( $(echo "$total_coverage_percent < 70" | bc -l) )); then
+              echo "::warning::Coverage is below 70%"
+            fi
+          else
+            echo "::warning::Coverage file not found"
           fi
 
   lint:
@@ -143,22 +156,19 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Set up Go
-        uses: actions/setup-go@v5
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
         with:
-          go-version: ${{ env.GO_VERSION }}
-          cache: true
+          dotnet-version: ${{ env.DOTNET_VERSION }}
 
-      - name: Initialize Go module
-        run: |
-          go mod init github.com/${{ github.repository }} || true
-          go mod tidy
+      - name: Restore dependencies
+        run: dotnet restore
 
-      - name: Run golangci-lint
-        uses: golangci/golangci-lint-action@v6
-        with:
-          version: latest
-          args: --timeout=5m
+      - name: Build with warnings as errors
+        run: dotnet build --no-restore --configuration Release /warnaserror
+
+      - name: Check code formatting
+        run: dotnet format --verify-no-changes --verbosity diagnostic
 
   security-scan:
     name: Security Scan
@@ -172,25 +182,34 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Set up Go
-        uses: actions/setup-go@v5
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
         with:
-          go-version: ${{ env.GO_VERSION }}
-          cache: true
+          dotnet-version: ${{ env.DOTNET_VERSION }}
 
-      - name: Run gosec Security Scanner
-        uses: securego/gosec@v2.21.4
-        with:
-          args: '-no-fail -fmt sarif -out gosec-results.sarif ./...'
+      - name: Restore dependencies
+        run: dotnet restore
 
-      - name: Upload gosec results to GitHub Security tab
+      - name: Check for vulnerable packages
+        run: |
+          dotnet list package --vulnerable --include-transitive 2>&1 | tee vulnerable-packages.txt
+          if grep -q "has the following vulnerable packages" vulnerable-packages.txt; then
+            echo "::warning::Vulnerable packages detected"
+          fi
+
+      - name: Install security-code-scan tool
+        run: dotnet tool install --global security-scan --version 5.6.7
+
+      - name: Run security code analysis
+        run: |
+          security-scan src/sample.csproj --verbose --export=security-report.sarif || true
+
+      - name: Upload security results to GitHub Security tab
         uses: github/codeql-action/upload-sarif@v4
         if: always()
         with:
-          sarif_file: gosec-results.sarif
-
-      - name: Run go vet
-        run: go vet ./...
+          sarif_file: security-report.sarif
+        continue-on-error: true
 
   build-validation:
     name: Build Validation
