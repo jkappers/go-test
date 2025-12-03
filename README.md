@@ -1,18 +1,16 @@
-# Go Sample Application
+# .NET Sample Application
 
-[![CI/CD Pipeline](https://github.com/example/go-sample/actions/workflows/ci-cd.yml/badge.svg)](https://github.com/example/go-sample/actions/workflows/ci-cd.yml)
-
-A simple Go HTTP server
+A simple .NET 10 Minimal API HTTP server.
 
 ## Quick Start
 
 ### Local Development
 
 ```bash
-# Run tests
-go test -v ./...
+# Build and run with Docker Compose
+docker compose up --build
 
-# Build and run locally
+# Or build and run manually
 docker build -t sample-app .
 docker run -p 2593:2593 sample-app
 
@@ -26,10 +24,6 @@ curl http://localhost:2593/health
 - `GET /` - Returns greeting with hostname
 - `GET /health` - Health check endpoint (returns 200 OK)
 
-## Rollback
+## Configuration
 
-To rollback to a previous version:
-
-1. Go to Actions → Rollback Deployment
-2. Run workflow with previous image tag
-3. Example tag: `main-abc1234` or `sha-abc1234`
+- `PORT` - HTTP port (default: 2593)
