@@ -38,7 +38,7 @@ public class ProgramTests
         var response = await _client.GetAsync("/");
         var content = await response.Content.ReadAsStringAsync();
 
-        Assert.IsTrue(content.Contains("Hello from"));
+        Assert.IsTrue(content.Contains("Goodbye from"));
         Assert.IsTrue(content.Length > 0);
     }
 
