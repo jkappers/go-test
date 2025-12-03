@@ -1,10 +1,12 @@
-name: CI/CD Pipeline
+name: CI/CD Main
 
 on:
   push:
-    branches: [main, staging, develop]
-  pull_request:
-    branches: [main, staging, develop]
+    branches: [main, staging]
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - '.github/workflows/IMPLEMENTATION-PLAN.md'
   workflow_dispatch:
 
 env:
@@ -17,7 +19,7 @@ permissions:
 
 concurrency:
   group: cicd-${{ github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  cancel-in-progress: false
 
 jobs:
   test:
@@ -134,7 +136,6 @@ jobs:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
             type=ref,event=branch
-            type=ref,event=pr
             type=sha,prefix={{branch}}-
             type=raw,value=latest,enable={{is_default_branch}}
             type=semver,pattern={{version}}
@@ -219,7 +220,6 @@ jobs:
           format: 'table'
           severity: 'CRITICAL,HIGH,MEDIUM'
 
-  # Compute image tag for deployments
   prepare-deploy:
     name: Prepare Deployment
     runs-on: ubuntu-latest
@@ -241,7 +241,7 @@ jobs:
     name: Deploy to Staging
     needs: [prepare-deploy]
     if: needs.prepare-deploy.outputs.branch == 'staging'
-    uses: ./.github/workflows/deploy.yml
+    uses: ./.github/workflows/cd-deploy.yml
     with:
       environment: staging
       image-tag: ${{ needs.prepare-deploy.outputs.image-tag }}
@@ -256,7 +256,7 @@ jobs:
     name: Deploy to Production
     needs: [prepare-deploy]
     if: needs.prepare-deploy.outputs.branch == 'main'
-    uses: ./.github/workflows/deploy.yml
+    uses: ./.github/workflows/cd-deploy.yml
     with:
       environment: production
       image-tag: ${{ needs.prepare-deploy.outputs.image-tag }}
